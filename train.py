@@ -16,6 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn import metrics
 import time
+import pickle as pkl
 from utils import get_time_dif, WarmupPolyLR, setup_logger
 from tensorboardX import SummaryWriter
 
@@ -47,8 +48,6 @@ def train(config, model, train_iter, test_iter):
         warmup_iters = config.warmup_epoch * len(train_iter)
         scheduler = WarmupPolyLR(optimizer, max_iters=config.num_epochs * len(train_iter), warmup_iters=warmup_iters,
                                  warmup_epoch=config.warmup_epoch, last_epoch=-1)
-    # 学习率指数衰减，每次epoch：学习率 = gamma * 学习率
-    # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     total_batch = 0  # 记录进行到多少batch
     test_best_f1 = 0
     last_improve = 0  # 记录上次验证集loss下降的batch数
@@ -59,11 +58,13 @@ def train(config, model, train_iter, test_iter):
     os.makedirs(model_save_dir, exist_ok=True)
     logger.info(json.dumps(vars(config), ensure_ascii=False, indent=2))
     for epoch in range(config.num_epochs):
-        # scheduler.step() # 学习率衰减
-        for i, (trains, labels) in enumerate(train_iter):
-            trains = [train.to(device) for train in trains]
-            labels = labels.to(device)
-            outputs = model(trains)
+        lr = optimizer.param_groups[0]['lr']
+        for i, batch in enumerate(train_iter):
+            lr = optimizer.param_groups[0]['lr']
+            inputs, masks, labels, seq_len = [x.to(device) for x in batch]
+            # trains = [train.to(device) for train in trains]
+            # labels = labels.to(device)
+            outputs = model(inputs, masks)
             model.zero_grad()
             loss = F.cross_entropy(outputs, labels)
             loss.backward()
@@ -75,7 +76,7 @@ def train(config, model, train_iter, test_iter):
                 true = labels.data.cpu()
                 predict = torch.max(outputs.data, 1)[1].cpu()
                 # train_acc = metrics.accuracy_score(true, predict)
-                train_acc, train_rec, train_f1, _ = metrics.precision_recall_fscore_support(true, predict, average='macro')
+                train_acc, train_rec, train_f1, _ = metrics.precision_recall_fscore_support(true, predict, average='macro', zero_division=0)
                 test_acc, test_rec, test_f1, test_loss = evaluate(config, model, test_iter)
                 if test_f1 > test_best_f1:
                     test_best_f1 = test_f1
@@ -86,12 +87,14 @@ def train(config, model, train_iter, test_iter):
                 else:
                     improve = ''
                 time_dif = get_time_dif(start_time)
-                msg = 'Epoch [{}/{}], Iter: {:>6},  Train Loss: {:>5.2f},  Train F1: {:>6.2%},  Test Loss: {:>5.2f},  Test F1: {:>6.2%},  Time: {} {}'
-                logger.info(msg.format(epoch + 1, config.num_epochs, total_batch, loss.item(), train_f1, test_loss, test_f1, time_dif, improve))
+                msg = 'Epoch [{}/{}], Iter: {:>6},  Train Loss: {:>5.2f},  Train F1: {:>6.2%},  Test Loss: {:>5.2f}, Test F1: {:>6.2%}, LR: {:>7.6f},Time: {} {}'
+                logger.info(msg.format(epoch + 1, config.num_epochs, total_batch, loss.item(), train_f1, test_loss, test_f1, lr, time_dif, improve))
                 writer.add_scalar("loss/train", loss.item(), total_batch)
                 writer.add_scalar("loss/test", test_loss, total_batch)
                 writer.add_scalar("f1/train", train_f1, total_batch)
                 writer.add_scalar("f1/test", test_f1, total_batch)
+                writer.add_scalar("train/lr", lr, total_batch)
+
                 model.train()
             total_batch += 1
             if total_batch - last_improve > config.require_improvement:
@@ -113,12 +116,12 @@ def test(config, model, test_iter, logger, best_model_path):
     test_acc, test_recall, test_f1, test_loss, test_report, test_confusion = evaluate(config, model, test_iter, test=True)
     msg = 'Test Loss: {0:>5.2},  Test Acc: {1:>6.2%}, Test Rec: {2:>6.2%}, Test F1: {3:>6.2%}'
     logger.info(msg.format(test_loss, test_acc, test_recall, test_f1))
-    logger.info("Precision, Recall and F1-Score...")
+    logger.info("\nPrecision, Recall and F1-Score...")
     logger.info(test_report)
-    logger.info("Confusion Matrix...")
-    logger.info(test_confusion)
+    logger.info("Confusion Matrix...\n")
+    logger.info('\n{}'.join(test_confusion))
     time_dif = get_time_dif(start_time)
-    logger.info("Time usage:", time_dif)
+    logger.info("Time usage:".format(time_dif))
 
 
 def evaluate(config, model, data_iter, test=False):
@@ -127,10 +130,11 @@ def evaluate(config, model, data_iter, test=False):
     predict_all = np.array([], dtype=int)
     labels_all = np.array([], dtype=int)
     with torch.no_grad():
-        for texts, labels in data_iter:
-            texts = [text.cuda() for text in texts]
-            labels = labels.cuda()
-            outputs = model(texts)
+        for batch in data_iter:
+            inputs, masks, labels, seq_len = [x.cuda() for x in batch]
+            # texts = [text.cuda() for text in texts]
+            # labels = labels.cuda()
+            outputs = model(inputs, masks)
             loss = F.cross_entropy(outputs, labels)
             loss_total += loss
             labels = labels.data.cpu().numpy()
@@ -139,7 +143,7 @@ def evaluate(config, model, data_iter, test=False):
             predict_all = np.append(predict_all, predic)
 
     # acc = metrics.accuracy_score(labels_all, predict_all)
-    acc, recall, f1, _ = metrics.precision_recall_fscore_support(labels_all, predict_all, average='macro')
+    acc, recall, f1, _ = metrics.precision_recall_fscore_support(labels_all, predict_all, average='macro', zero_division=0)
     if test:
         report = metrics.classification_report(labels_all, predict_all, target_names=config.class_list, digits=4)
         confusion = metrics.confusion_matrix(labels_all, predict_all)

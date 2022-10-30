@@ -14,60 +14,30 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import copy
+from . import BaseConfig
 
 
-class Config(object):
+class Config(BaseConfig):
 
     """配置参数"""
-    def __init__(self, dataset, embedding, train=True):
-        time_str = time.strftime("%Y%m%d-%H%M")
-        output_dir = f'./output/{time_str}'
-        if train:
-            os.makedirs(output_dir, exist_ok=True)
-
-        self.model_name = 'Transformer'
-        self.train_path = './data/train_re.csv'                                # 训练集
-        self.test_path = './data/test_re.csv'                                  # 测试集
-        # self.class_list = [x.strip() for x in open(
-        #     dataset + '/data/class.txt', encoding='utf-8').readlines()]              # 类别名单
-        self.class_list = {'科技': 0, '股票': 1, '体育': 2, '娱乐': 3, '时政': 4, '社会': 5, '教育': 6, '财经': 7, '家居': 8, '游戏': 9, '房产': 10, '时尚': 11, '彩票': 12, '星座': 13}
-        self.vocab_path = './data/vocab.pkl'                                # 词表
-        self.output_dir = output_dir        # 模型训练结果
-        self.embedding_pretrained = torch.tensor(
-            np.load(dataset + '/data/' + embedding)["embeddings"].astype('float32'))\
-            if embedding != 'random' else None                                       # 预训练词向量
-
+    def __init__(self, train=True):
+        super(Config, self).__init__(train)
         self.dropout = 0.1                                              # 随机失活
-        self.require_improvement = 3000                                 # 若超过1000batch效果还没提升，则提前结束训练
-        self.num_classes = len(self.class_list)                         # 类别数
-        self.n_vocab = 0                                                # 词表大小，在运行时赋值
-        self.num_epochs = 20                                            # epoch数
-        self.batch_size = 128                                           # mini-batch大小
-        self.pad_size = 512                                              # 每句话处理成的长度(短填长切)
-        self.learning_rate = 5e-4                                       # 学习率
-        self.embed = self.embedding_pretrained.size(1)\
-            if self.embedding_pretrained is not None else 300           # 字向量维度
+        self.embed = 300           # 字向量维度
         self.dim_model = 300
         self.hidden = 1024
         self.last_hidden = 512
         self.num_head = 5
         self.num_encoder = 4
 
-        self.log_iter = 100
-        self.warmup = True
-        self.warmup_epoch = 1
-
 
 '''Attention Is All You Need'''
 
 
 class Model(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, **kwargs):
         super(Model, self).__init__()
-        if config.embedding_pretrained is not None:
-            self.embedding = nn.Embedding.from_pretrained(config.embedding_pretrained, freeze=False)
-        else:
-            self.embedding = nn.Embedding(config.n_vocab, config.embed, padding_idx=config.n_vocab - 1)
+        self.embedding = nn.Embedding(config.n_vocab, config.embed, padding_idx=config.n_vocab - 1)
 
         self.postion_embedding = Positional_Encoding(config.embed, config.pad_size, config.dropout)
         self.encoder = Encoder(config.dim_model, config.num_head, config.hidden, config.dropout)
@@ -80,8 +50,8 @@ class Model(nn.Module):
         # self.fc2 = nn.Linear(config.last_hidden, config.num_classes)
         # self.fc1 = nn.Linear(config.dim_model, config.num_classes)
 
-    def forward(self, x):
-        out = self.embedding(x[0])
+    def forward(self, x, mask=None):
+        out = self.embedding(x)
         out = self.postion_embedding(out)
         for encoder in self.encoders:
             out = encoder(out)
