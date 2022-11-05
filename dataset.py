@@ -24,7 +24,7 @@ def build_vocab(self, file_path):
     return vocab_dic
 
 
-def dateset_collect(batch):
+def dataset_collect(batch):
     words, masks, labels, lens = [], [], [], []
     for word, mask, label, l in batch:
         words.append(word)

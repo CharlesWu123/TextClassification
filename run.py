@@ -14,7 +14,7 @@ import torch
 import numpy as np
 from train import train
 from importlib import import_module
-from dataset import MyDataset, build_vocab, dateset_collect
+from dataset import MyDataset, build_vocab, dataset_collect
 from torch.utils.data import DataLoader
 import pickle as pkl
 from utils import get_time_dif
@@ -41,8 +41,8 @@ if __name__ == '__main__':
     print(f"Vocab size: {len(vocab)}", flush=True)
     train_dataset = MyDataset(config.train_path, vocab, config)
     test_dataset = MyDataset(config.test_path, vocab, config)
-    train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size, collate_fn=dateset_collect, shuffle=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=config.batch_size, collate_fn=dateset_collect, shuffle=False)
+    train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size, collate_fn=dataset_collect, shuffle=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=config.batch_size, collate_fn=dataset_collect, shuffle=False)
     time_dif = get_time_dif(start_time)
     print("Train Dataset: {}, Dataloader: {}, Test Dataset: {}, Dataloader: {}, Time usage:".format(
         len(train_dataset), len(train_dataloader), len(test_dataset), len(test_dataloader), time_dif), flush=True)
